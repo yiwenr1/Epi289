@@ -1,0 +1,266 @@
+---
+title: "epi289-wk2hw"
+output: html_document
+date: "2023-02-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library("readxl")
+nhefs <- read_excel("/Users/raoyiwen/Desktop/nhefs.xlsx")
+nhefs.nmv <- nhefs
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+##Q4
+```{r car, results='hide', eval =FALSE}
+
+#causal odds ratio, PS method
+#fit PS
+fit.para1 <- glm(qsmk~sex + race + age + I(age*age) + as.factor(education) + as.factor(active), data=nhefs.nmv, family=binomial())
+summary(fit.para1)
+
+nhefs.nmv$p.qsmk1 <- predict(fit.para1, type="response")
+head(cbind(nhefs.nmv$seqn, nhefs.nmv$sex, nhefs.nmv$age50, nhefs.nmv$p.qsmk1))
+
+#fit PS into model
+fit.para2 <- glm(death ~ qsmk + p.qsmk1 + I(p.qsmk1*p.qsmk1), 
+                 data=nhefs.nmv, family=binomial())
+summary(fit.para2)
+
+coefficients(fit.para2)
+confint(fit.para2)
+
+#causal odds ratio original?
+fit.para2 <- glm(death ~ qsmk + sex + race + age + I(age*age) + as.factor(education) + as.factor(active) , 
+                 data=nhefs.nmv, family=binomial())
+summary(fit.para2)
+
+coefficients(fit.para2)
+confint(fit.para2)
+
+
+```
+
+## Q13
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+#add variable age50 to nhefs.nmv
+nhefs.nmv$age50 <- ifelse(nhefs.nmv$age>=50, 1, 0)
+
+#try
+logistic_model_1 <- glm(death ~ qsmk + sex + race + age50, 
+                 data=nhefs.nmv, family=binomial())
+summary(logistic_model_1 )
+
+coefficients(logistic_model_1 )
+confint(logistic_model_1 )
+
+
+#analysis without models
+table(nhefs.nmv$sex, nhefs.nmv$age50, nhefs.nmv$race)
+prop.table(table(nhefs.nmv$sex, nhefs.nmv$age50,nhefs.nmv$race,dnn = c("Sex","Age50", "Race")))
+
+#conditional means - Age Sex Race 
+#0 0 0 
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==0 & nhefs.nmv$sex==0 & nhefs.nmv$race == 0])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==0 & nhefs.nmv$sex==0 & nhefs.nmv$race == 0])
+
+#0 0 1
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==0 & nhefs.nmv$sex==0 & nhefs.nmv$race == 1])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==0 & nhefs.nmv$sex==0 & nhefs.nmv$race == 1])
+
+#0 1 0
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==0 & nhefs.nmv$sex==1 & nhefs.nmv$race == 0])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==0 & nhefs.nmv$sex==1 & nhefs.nmv$race == 0])
+
+#0 1 1
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==0 & nhefs.nmv$sex==1 & nhefs.nmv$race == 1])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==0 & nhefs.nmv$sex==1 & nhefs.nmv$race == 1])
+
+#1 0 0
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==1 & nhefs.nmv$sex==0 & nhefs.nmv$race == 0])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==1 & nhefs.nmv$sex==0 & nhefs.nmv$race == 0])
+
+#1 0 1
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==1 & nhefs.nmv$sex==0 & nhefs.nmv$race == 1])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==1 & nhefs.nmv$sex==0 & nhefs.nmv$race == 1])
+
+#1 1 0
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==1 & nhefs.nmv$sex==1 & nhefs.nmv$race == 0])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==1 & nhefs.nmv$sex==1 & nhefs.nmv$race == 0])
+
+#1 1 1
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==0 & nhefs.nmv$age50==1 & nhefs.nmv$sex==1 & nhefs.nmv$race == 1])
+
+summary(nhefs.nmv$death[nhefs.nmv$qsmk==1 & nhefs.nmv$age50==1 & nhefs.nmv$sex==1 & nhefs.nmv$race == 1])
+```
+```{r}
+#Non-parametric with models
+condfit.agesexrace <- glm(death~qsmk*sex*age50*race, data=nhefs.nmv,family=binomial(link = 'logit'))
+summary(condfit.agesexrace)
+
+#A = 0
+#000
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=0, sex=0, race=0)),type="response")
+#001
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=0, sex=0, race=1)),type="response")
+#010
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=0, sex=1, race=0)),type="response")
+#011
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=0, sex=1,race=1)),type="response")
+#100
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=1, sex=0, race=0)),type="response")
+#101
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=1, sex=0,race=1)),type="response")
+#110
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=1, sex=1, race=0)),type="response")
+#111
+predict(condfit.agesexrace, data.frame(cbind(qsmk=0, age50=1, sex=1, race=1)),type="response")
+
+#A = 1
+#000
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=0, sex=0, race=0)),type="response")
+#001
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=0, sex=0, race=1)),type="response")
+#010
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=0, sex=1, race=0)),type="response")
+#011
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=0, sex=1,race=1)),type="response")
+#100
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=1, sex=0, race=0)),type="response")
+#101
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=1, sex=0,race=1)),type="response")
+#110
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=1, sex=1, race=0)),type="response")
+#111
+predict(condfit.agesexrace, data.frame(cbind(qsmk=1, age50=1, sex=1, race=1)),type="response")
+```
+
+
+```{r}
+#Parametric with models
+condfit.agesexrace_para <- glm(death~qsmk+sex+age50+race, data=nhefs.nmv,family=binomial(link = 'logit'))
+summary(condfit.agesexrace_para)
+
+#A = 0
+#000
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=0, sex=0, race=0)),type="response")
+#001
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=0, sex=0, race=1)),type="response")
+#010
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=0, sex=1, race=0)),type="response")
+#011
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=0, sex=1,race=1)),type="response")
+#100
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=1, sex=0, race=0)),type="response")
+#101
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=1, sex=0,race=1)),type="response")
+#110
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=1, sex=1, race=0)),type="response")
+#111
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=0, age50=1, sex=1, race=1)),type="response")
+
+#A = 1
+#000
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=0, sex=0, race=0)),type="response")
+#001
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=0, sex=0, race=1)),type="response")
+#010
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=0, sex=1, race=0)),type="response")
+#011
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=0, sex=1,race=1)),type="response")
+#100
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=1, sex=0, race=0)),type="response")
+#101
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=1, sex=0,race=1)),type="response")
+#110
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=1, sex=1, race=0)),type="response")
+#111
+predict(condfit.agesexrace_para, data.frame(cbind(qsmk=1, age50=1, sex=1, race=1)),type="response")
+```
+
+
+```{r}
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==0 & nhefs$sex==0 & nhefs$race==0, 1, NA)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==0 & nhefs$sex==0 & nhefs$race==1, 2, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==0 & nhefs$sex==1 & nhefs$race==0, 3, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==0 & nhefs$sex==1 & nhefs$race==1, 4, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==1 & nhefs$sex==0 & nhefs$race==0, 5, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==1 & nhefs$sex==0 & nhefs$race==1, 6, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==1 & nhefs$sex==1 & nhefs$race==0, 7, nhefs$STAND_TABLE)
+nhefs$STAND_TABLE <- ifelse(nhefs$age50==1 & nhefs$sex==1 & nhefs$race==1, 8, nhefs$STAND_TABLE)
+
+# Prevalence of each of these strata
+prop.table(table(nhefs$STAND_TABLE))
+
+# Get risk in each of these strata
+aggregate(nhefs$death, list(nhefs$qsmk, nhefs$STAND_TABLE), mean)
+```
+
+
+```{r}
+##################################################################
+# Standardization by multiple confounders using an outcome model #
+##################################################################
+# add variable age50 to nhefs
+nhefs$age50 <- ifelse(nhefs.nmv$age>=50, 1, 0)
+# create a dataset with 3 copies of each subject
+nhefs$interv <- -1 # 1st copy: equal to original one
+
+interv0 <- nhefs # 2nd copy: treatment set to 0, outcome to missing
+interv0$interv <- 0
+interv0$qsmk <- 0
+interv0$wt82_71 <- NA
+
+interv1 <- nhefs # 3rd copy: treatment set to 1, outcome to missing
+interv1$interv <- 1
+interv1$qsmk <- 1
+interv1$wt82_71 <- NA
+
+onesample <- rbind(nhefs, interv0, interv1) # combining datasets
+
+# linear model to estimate mean outcome conditional on treatment and confounders
+# parameters are estimated using original observations only (nhefs)
+# parameter estimates are used to predict mean outcome for observations with 
+# treatment set to 0 (interv=0) and to 1 (interv=1)
+
+#fit model
+std <- glm(death~qsmk+sex+age50+race, data=nhefs.nmv,family=binomial(link = 'logit'))
+summary(std)   
+
+#obtained predicted values for everyone
+onesample$predicted_meanY1 <- predict(std, onesample,type = "response")
+
+#get weighted risks
+# estimate mean outcome in each of the groups interv=0, and interv=1
+# this mean outcome is a weighted average of the mean outcomes in each combination 
+# of values of treatment and confounders, that is, the standardized outcome
+mean(onesample[which(onesample$interv==-1),]$predicted_meanY1)
+mean(onesample[which(onesample$interv==0),]$predicted_meanY1)
+mean(onesample[which(onesample$interv==1),]$predicted_meanY1)
+
+#obtain standardized risk difference comparing had everyone been treated versus had no one been treated
+mean(onesample[which(onesample$interv==1),]$predicted_meanY1) -
+mean(onesample[which(onesample$interv==0),]$predicted_meanY1)
+```
+```
+
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
