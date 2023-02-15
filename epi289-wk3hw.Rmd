@@ -1,0 +1,156 @@
+---
+title: "epi289-wk3hw"
+output: html_document
+date: "2023-02-12"
+---
+
+```{r setup, include=FALSE}
+library("readxl")
+library("readxl")
+nhefs <- read_excel("/Users/raoyiwen/Desktop/nhefs.xlsx")
+nhefs.nmv <- nhefs[which(!is.na(nhefs$wt82)),] 
+nhefs.nmv$age50 <- ifelse(nhefs.nmv$age>=50, 1, 0)
+nhefs.nmv$wtgain <- ifelse(nhefs.nmv$wt82_71>0, 1, 0)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+## Part 1
+##estimation of ip weights with a logistic model
+
+```{r pressure, echo=FALSE}
+#fit logit Pr[A=1|L]
+fit <- glm(qsmk ~ sex + race + age + I(age^2), family=binomial(), data=nhefs.nmv)
+summary(fit)
+
+#find predicted probability p from model
+nhefs.nmv$p.qsmk <- predict(fit, nhefs.nmv, type="response")
+
+#use these predicted p to assign weights to each person
+nhefs.nmv$w3 <- ifelse(nhefs.nmv$qsmk==1, 1/nhefs.nmv$p.qsmk, 1/(1-nhefs.nmv$p.qsmk))
+summary(nhefs.nmv$w3)
+
+# Risk Difference without MSM 
+#estimate IP weighted outcomes in pseudo population? (is it really psedo?where's the expansion)
+#CONTINUOUS outcome Y
+weighted.mean(nhefs.nmv$wt82_71[nhefs.nmv$qsmk==0],w=nhefs.nmv$w3[nhefs.nmv$qsmk==0]) - 
+weighted.mean(nhefs.nmv$wt82_71[nhefs.nmv$qsmk==1],w=nhefs.nmv$w3[nhefs.nmv$qsmk==1])
+
+
+# Risk Difference with MSM
+# marginal structural model with conservative 95% CI
+
+#CONTINUOUS outcome Y: here use default lm model
+#Here b1 = the difference of E[Y|A=1] - E[Y|A=0] (no logit conversion)
+#if dichotomous outcome Y: specifiy family=binomial(link = 'logit')
+
+library("geepack")
+msm.valid <- geeglm(wt82_71 ~ qsmk, data=nhefs.nmv, weights=w3, id=seqn,
+                corstr="independence")
+summary(msm.valid)
+
+beta <- coef(msm.valid)
+SE <- coef(summary(msm.valid))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(beta, lcl, ucl)
+
+
+```
+
+##Part II
+```{r}
+#All A=1 or All A=0
+#All 0:sum = 0
+#All 1:sum = n()
+
+#sex = 0, race = 0
+nhefs.part2 <- nhefs.nmv %>%
+  filter(sex == 0 & race == 0) %>%
+  arrange(age)
+df <- nhefs.part2  %>%
+  arrange(age)%>%
+  group_by(age) %>%
+  summarise(sum_qsmk = sum(qsmk),
+            n = n()) 
+ind <- which(df$sum_qsmk == 0 |df$sum_qsmk == df$n)
+df$age[ind]
+
+#sex = 1, race = 0
+nhefs.part2 <- nhefs.nmv %>%
+  filter(sex == 1 & race == 0) %>%
+  arrange(age)
+df <- nhefs.part2  %>%
+  arrange(age)%>%
+  group_by(age) %>%
+  summarise(sum_qsmk = sum(qsmk),
+            n = n()) 
+ind <- which(df$sum_qsmk == 0 |df$sum_qsmk == df$n)
+df$age[ind]
+
+##check for positivity
+table(nhefs.nmv$age[nhefs.nmv$race == 0 & nhefs.nmv$sex == 0], 
+      nhefs.nmv$qsmk[nhefs.nmv$race == 0 & nhefs.nmv$sex == 0],
+      dnn = c("Age","qsmk"))
+
+table(nhefs.nmv$age[nhefs.nmv$race == 0 & nhefs.nmv$sex == 1], 
+      nhefs.nmv$qsmk[nhefs.nmv$race == 0 & nhefs.nmv$sex == 1])
+
+
+```
+
+##Part III
+```{r}
+
+#Dichotomous outcome Y
+#fit logit Pr[A=1|L]
+fit <- glm(qsmk ~ sex + race + age + I(age^2), family=binomial(link = 'logit'), data=nhefs)
+summary(fit)
+
+#find predicted probability p from model
+nhefs$p.qsmk <- predict(fit, nhefs, type="response")
+
+#use these predicted p to assign weights to each person
+nhefs$w3 <- ifelse(nhefs$qsmk==1, 1/nhefs$p.qsmk, 1/(1-nhefs$p.qsmk))
+summary(nhefs$w3)
+
+#Odds Ratio with MSM
+#b1: log odds ratio of death comparing A=1 to A=0
+
+msm.valid <- geeglm(death ~ qsmk, data=nhefs, weights=w3, id=seqn,
+                corstr="independence", family=binomial(link = 'logit'))
+exp(coefficients(msm.valid))
+
+summary(msm.valid)
+
+beta <- coef(msm.valid)
+SE <- coef(summary(msm.valid))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(exp(beta), exp(lcl), exp(ucl))
+
+
+#RD
+msm_RD.valid <- geeglm(death ~ qsmk, data=nhefs, weights=w3, id=seqn,
+                corstr="independence", family=binomial(link = 'identity'))
+(coefficients(msm_RD.valid))
+
+#RR
+msm_RR.valid <- geeglm(death ~ qsmk, data=nhefs, weights=w3, id=seqn,
+                corstr="independence", family=binomial(link = 'log'))
+exp(coefficients(msm_RR.valid))
+
+
+
+
+
+
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
