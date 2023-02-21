@@ -1,0 +1,223 @@
+---
+title: "epi289-wk4hw"
+output: html_document
+date: "2023-02-20"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r setup, include=FALSE}
+library("readxl")
+library("dplyr")
+nhefs <- read_excel("/Users/raoyiwen/Desktop/nhefs.xlsx")
+
+
+```
+
+## Part 1 Stabilized IPW [confounding], Dichotomous Y
+
+```{r pressure, echo=FALSE}
+# estimation of denominator of ip weights
+fit.pd <- glm(qsmk ~ sex + race + age + smokeintensity + asthma + as.factor(education) + as.factor(active), family=binomial(link = 'logit'),
+           data=nhefs)
+summary(fit.pd)
+nhefs$pd.qsmk <- predict(fit.pd, nhefs, type="response")
+
+# estimation of numerator of ip weights 
+fit.pn <- glm(qsmk ~ 1, family=binomial(), data=nhefs)
+summary(fit.pn)
+nhefs$pn.qsmk <- predict(fit.pn, nhefs, type="response")
+
+#summary(nhefs$pn.qsmk)
+#prop.table(table(nhefs$qsmk))
+
+nhefs$sw <- ifelse(nhefs$qsmk==1, nhefs$pn.qsmk/nhefs$pd.qsmk,
+                       (1-nhefs$pn.qsmk)/(1-nhefs$pd.qsmk))
+
+summary(nhefs$sw)
+
+#MSM
+
+msm.valid <- geeglm(death ~ qsmk, data=nhefs, weights=sw, id=seqn,
+                corstr="independence", family=binomial(link = 'logit'))
+
+#OR
+exp(coefficients(msm.valid))
+
+summary(msm.valid)
+
+beta <- coef(msm.valid)
+SE <- coef(summary(msm.valid))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(exp(beta), exp(lcl), exp(ucl))
+
+
+#RD
+msm_RD.valid <- geeglm(death ~ qsmk, data=nhefs, weights=sw, id=seqn,
+                corstr="independence", family=binomial(link = 'identity'))
+(coefficients(msm_RD.valid))
+
+#RR
+msm_RR.valid <- geeglm(death ~ qsmk, data=nhefs, weights=sw, id=seqn,
+                corstr="independence", family=binomial(link = 'log'))
+exp(coefficients(msm_RR.valid))
+
+
+```
+
+
+## Part 2 Stabilized IPW [selection bias], Continuous Y
+```{r}
+#Add censor variable
+nhefs$cens <- ifelse(is.na(nhefs$wt82), 1, 0)
+
+# estimation of denominator of treatment weights
+denom.tx <- glm(qsmk ~ sex + race + age + wt71, 
+                 family = binomial(), data = nhefs)
+summary(denom.tx)
+pd.qsmk <- predict(denom.tx, type = "response")
+
+# estimation of numerator of treatment weights
+numer.tx <- glm(qsmk~1, family = binomial(), data = nhefs)
+summary(numer.tx)
+pn.qsmk <- predict(numer.tx, type = "response")
+
+# estimation of denominator of censoring weights
+denom.cens <- glm(cens ~ qsmk + sex + race + age + weakheart, 
+                  family = binomial(), data = nhefs)
+summary(denom.cens)
+
+pd.cens <- 1-predict(denom.cens, type = "response")#only need Pr[C=0|A,L]
+
+# estimation of numerator of censoring weights
+numer.cens <- glm(cens~qsmk, family = binomial(), data = nhefs)
+summary(numer.cens)
+pn.cens <- 1-predict(numer.cens, type = "response")#only need Pr[C=0|A,L]
+
+#get overall sw
+nhefs$sw.a <- ifelse(nhefs$qsmk == 0, ((1-pn.qsmk)/(1-pd.qsmk)),
+                     (pn.qsmk/pd.qsmk))
+nhefs$sw.c <- pn.cens/pd.cens 
+nhefs$sw <- nhefs$sw.c*nhefs$sw.a
+
+summary(nhefs$sw.a)
+#sd(nhefs$sw.a)
+#summary(nhefs$sw.c)
+#sd(nhefs$sw.c)
+summary(nhefs$sw)
+#sd(nhefs$sw)
+
+#Outcome Model
+#Here b1 = the difference of E[Y|A=1] - E[Y|A=0] (no logit conversion)
+msm.sw.RD <- geeglm(wt82_71~qsmk, data=nhefs, 
+                 weights=sw, id=seqn, corstr="independence")
+summary(msm.sw.RD)
+
+beta <- coef(msm.sw.RD)
+SE <- coef(summary(msm.sw.RD))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(beta, lcl, ucl)
+
+
+
+
+```
+##Part III Same as Part II, but using standardization
+```{r}
+##################################################################
+# Standardization by multiple confounders using an outcome model #
+##################################################################
+#Q18
+#Parametric
+nhefs$cens <- ifelse(is.na(nhefs$wt82), 1, 0)
+# create a dataset with 3 copies of each subject
+nhefs$interv <- -1 # 1st copy: equal to original one
+
+interv0 <- nhefs # 2nd copy: treatment set to 0, outcome to missing
+interv0$interv <- 0
+interv0$qsmk <- 0
+interv0$wt82_71 <- NA
+
+interv1 <- nhefs # 3rd copy: treatment set to 1, outcome to missing
+interv1$interv <- 1
+interv1$qsmk <- 1
+interv1$wt82_71 <- NA
+
+onesample <- rbind(nhefs, interv0, interv1) # combining datasets
+
+# linear model to estimate mean outcome conditional on treatment and confounders
+# parameters are estimated using original observations only (nhefs)
+# parameter estimates are used to predict mean outcome for observations with 
+# treatment set to 0 (interv=0) and to 1 (interv=1)
+
+#fit model
+std <- glm(wt82_71~qsmk+age+sex+race+wt71+weakheart, data=nhefs,family=gaussian())
+summary(std)   
+
+#obtained predicted values for everyone
+onesample$predicted_meanY1 <- predict(std, onesample,type = "response")
+
+#get weighted risks
+# estimate mean outcome in each of the groups interv=0, and interv=1
+# this mean outcome is a weighted average of the mean outcomes in each combination 
+# of values of treatment and confounders, that is, the standardized outcome
+mean(onesample[which(onesample$interv==-1 & onesample$cens == 0),]$predicted_meanY1)
+mean(onesample[which(onesample$interv==0 & onesample$cens == 0),]$predicted_meanY1)
+mean(onesample[which(onesample$interv==1 & onesample$cens == 0),]$predicted_meanY1)
+
+#obtain standardized risk difference comparing had everyone been treated versus had no one been treated
+a <- mean(onesample[which(onesample$interv==1 & onesample$cens == 0),]$predicted_meanY1) -
+mean(onesample[which(onesample$interv==0  & onesample$cens == 0),]$predicted_meanY1)
+
+
+
+print(a, digits=4)
+
+```
+##extra credit Question 9
+```{r}
+fit.pd.onesample <- glm(qsmk ~ sex + race + age + smokeintensity + asthma + as.factor(education) + as.factor(active), family=binomial(link = 'logit'),
+           data=onesample)
+summary(fit.pd.onesample)
+onesample$pd.qsmk <- predict(fit.pd.onesample, onesample, type="response")
+
+# estimation of numerator of ip weights 
+fit.pn.onesample <- glm(qsmk ~ 1, family=binomial(), data=onesample)
+summary(fit.pn.onesample)
+onesample$pn.qsmk <- predict(fit.pn.onesample, onesample, type="response")
+
+
+onesample$sw <- ifelse(onesample$qsmk==1, onesample$pn.qsmk/onesample$pd.qsmk,
+                       (1-onesample$pn.qsmk)/(1-onesample$pd.qsmk))
+
+
+#MSM
+
+msm.valid.onesample <- geeglm(death ~ qsmk, data=onesample, weights=sw, id=seqn,
+                corstr="independence", family=binomial(link = 'logit'))
+
+#OR
+exp(coefficients(msm.valid.onesample))
+
+summary(msm.valid.onesample)
+
+beta <- coef(msm.valid.onesample)
+SE <- coef(summary(msm.valid.onesample))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(exp(beta), exp(lcl), exp(ucl))
+```
+
+
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
