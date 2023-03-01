@@ -1,0 +1,118 @@
+---
+title: "epi289-hw5"
+output: html_document
+date: "2023-02-25"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r pressure, echo=FALSE}
+library(sem) 
+library("readxl")
+library("dplyr")
+nhefs <- read_excel("/Users/raoyiwen/Desktop/nhefs.xlsx")
+
+#drop the missing instrument variable
+#no need to drop missing outcome, R do it for us in model building
+nhefs.iv <- nhefs[which(!is.na(nhefs$price82)),]
+nhefs.iv$highprice <- ifelse(nhefs.iv$price82>=1.5, 1, 0)
+
+```
+
+
+```{r}
+#ONLY IPW adjusting for selection bias?
+#Put confounders covariates in outcome model?
+
+#Add censor variable
+nhefs.iv$cens <- ifelse(is.na(nhefs.iv$wt82_71), 1, 0)
+
+######################################################################
+# IPW for selection bias
+# Unstabilized weight 
+######################################################################
+# estimation of denominator of censoring weights
+denom.cens <- glm(cens ~ qsmk + age + sex + race + smokeintensity + weakheart, 
+                  family = binomial(), data = nhefs.iv)
+summary(denom.cens)
+
+pd.cens <- 1-predict(denom.cens, type = "response")#only need Pr[C=0|A,L]
+
+nhefs.iv$w.c <- 1/pd.cens
+
+
+######################################################################
+# Estimating the average causal using the standard IV estimator
+# Conditional on baseline covariates
+######################################################################
+#nhefs.iv <- nhefs[which(!is.na(nhefs$wt82) & !is.na(nhefs$price82)),]
+
+
+
+model1 <- tsls(wt82_71 ~ qsmk,
+               ~ highprice, weights=w.c, data = nhefs.iv)
+summary(model1)
+
+
+#We're not using this, but in what scenario will we use?
+#need to specify covariate in both outcome model and model for exposure
+#condition on both stage in 2-stage
+model2 <- tsls(wt82_71 ~ qsmk + age + sex + race + smokeintensity + weakheart,
+               ~ highprice + age + sex + race + smokeintensity + weakheart, weights=w.c, data = nhefs.iv)
+summary(model2)
+
+
+# Calculate proportion of compliers: Pr[A=1|Z=1] - Pr[A=1|Z=0]
+#substraction of two weighted mean
+nhefs.iv2 <- nhefs.iv[which(nhefs.iv$cens!=1),]
+
+AZ1 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 1], nhefs.iv2$w.c[nhefs.iv2$highprice == 1]) 
+AZ0 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 0], nhefs.iv2$w.c[nhefs.iv2$highprice == 0]) 
+
+AZ1 - AZ0
+
+#probability table method ?
+prop.table(table(nhefs.iv2[,c("highprice", "qsmk")]),1) #[Z=1] - [Z=0]  -> denominator of IV estimate
+
+0.2578397 -0.1951220
+```
+```
+```{r}
+#Reference from Lawson
+#DATA WRANGLING UPFRONT
+nhefs.iv <- nhefs[which(!is.na(nhefs$price82)),] # Disregard missing instrument for simplicity
+nhefs.iv$cens <- ifelse(is.na(nhefs.iv$wt82_71), 1, 0)
+nhefs.iv$highprice <- ifelse(nhefs.iv$price82>=1.5, 1, 0)
+
+
+# Load library
+library(sem)
+
+# Fit TSLS model for IV estimand
+yourmodelname <- tsls(outcome ~ exposureA, ~IV instrument, data = yourdata, weight = yourcensoringweight)
+summary(yourmodelname)
+
+# Calculate proportion of compliers: Pr[A=1|Z=1] - Pr[A=1|Z=0]
+AZ1 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 1], nhefs.iv2$YOURCENSORINGWEIGHT[nhefs.iv2$highprice == 1]) 
+
+AZ0 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 0], nhefs.iv2$YOURCENSORINGWEIGHT [nhefs.iv2$highprice == 0]) 
+
+AZ1-AZ0 # Proportion of compliers.
+
+# Calculate proportion of compliers:
+nhefs.iv2 <- nhefs.iv[which(nhefs.iv$cens!=1),]
+
+AZ1 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 1], nhefs.iv2$YOURCENSORINGWEIGHT[nhefs.iv2$highprice == 1]) 
+AZ0 <- weighted.mean(nhefs.iv2$qsmk[nhefs.iv2$highprice == 0], nhefs.iv2$YOURCENSORINGWEIGHT[nhefs.iv2$highprice == 0]) 
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
