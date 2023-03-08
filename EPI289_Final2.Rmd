@@ -1,0 +1,301 @@
+---
+title: "EPI289_FINAL"
+output: html_document
+date: "2023-03-03"
+---
+
+##Question 6
+#estimate the causal effect of interest with confounding adjustment and selection bias adjustment via IP weighting with non-stabilized weights.
+
+```{r}
+#import dataset and packages
+hivpoint <- read.csv("/Users/raoyiwen/Desktop/hivpoint.csv")
+install.packages("geepack")
+library(geepack)
+```
+
+```{r setup, include=FALSE}
+################################################
+# Adjusting for confounding and selection bias , Unstablized IPW#
+################################################
+
+# estimation of denominator of treatment weights
+#fit logit Pr[A=1|L]
+denom.tx <- glm(treatment ~ age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), family = binomial(), data = hivpoint)
+summary(denom.tx)
+
+#find predicted probability p from model
+pd.treatment <- predict(denom.tx, type = "response")
+
+#use these predicted p to assign weights to each person
+hivpoint$w.a <- ifelse(hivpoint$treatment==1, 1/pd.treatment, 1/(1-pd.treatment))
+summary(hivpoint$w.a)
+
+# estimation of denominator of censoring weights
+denom.cens <- glm(censoring == 0 ~ treatment + age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat),family = binomial(), data = hivpoint)
+summary(denom.cens)
+
+pd.cens<- predict(denom.cens, type = "response") #only need Pr[C=0|A,L]
+#hivpoint.c <- hivpoint[which(!is.na(hivpoint$logrna)),]
+#pd.cens<- predict(denom.cens, hivpoint.c, type = "response") 
+
+hivpoint$w.c <- 1/pd.cens
+
+#combine w.c and w.a
+hivpoint$u.w <- hivpoint$w.c*hivpoint$w.a
+
+summary(hivpoint$u.w)
+
+#outcome model
+msm.uw <- geeglm(logrna ~ treatment, data=hivpoint, 
+                 weights=u.w, id=id, corstr="independence")
+summary(msm.uw)
+
+options(digits=4)
+
+beta <- coef(msm.uw)
+SE <- coef(summary(msm.uw))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(beta, lcl, ucl)
+
+
+```
+
+##Q12 
+#estimate the causal effect of interest with confounding adjustment via g-estimation and selection bias adjustment via IP weighting with non-stabilized weights.
+
+```{r cars}
+####################################################
+# G-estimation + IPW for selection bias adjustment #
+####################################################
+
+# estimation of denominator of censoring weights
+
+denom.cens <- glm(censoring == 0 ~ treatment + age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat),family = binomial(), data = hivpoint)
+
+hivpoint.c <- hivpoint[which(!is.na(hivpoint$logrna)),]
+hivpoint.c$pd.cens<- predict(denom.cens, hivpoint.c, type = "response") 
+hivpoint.c$w.c <- 1/hivpoint.c$pd.cens
+
+#######################################
+# G-estimation: Closed-form estimator #
+#######################################
+
+logit.est <- glm(treatment ~ age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), family=binomial(), data=hivpoint.c, weight=w.c)
+summary(logit.est)
+hivpoint.c$ptreatment <- predict(logit.est, hivpoint.c, type = "response")
+summary(hivpoint.c$ptreatment)
+
+options(digits=5)
+with(hivpoint.c, sum(w.c*logrna*(treatment - ptreatment)) / sum(w.c*treatment*(treatment - ptreatment)))
+
+########draft#########
+beta <- coef(logit.est )
+SE <- coef(summary(logit.est))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(beta, lcl, ucl)
+
+##########################################################3
+# finding the approximate 95% CI
+#install.packages("geepack")
+library("geepack")
+grid <- seq(from = -2,to = -1, by = 0.001)
+j = 0
+Hpsi.coefs <- cbind(rep(NA,length(grid)), rep(NA, length(grid)))
+colnames(Hpsi.coefs) <- c("Estimate", "p-value")
+
+for (i in grid){
+  psi = i
+  j = j+1
+  #structured nested model
+  hivpoint.c$Hpsi <- hivpoint.c$logrna - psi * hivpoint.c$treatment 
+  
+  #logitic regression model to estimate what psi is
+  gest.fit <- geeglm(treatment ~ age + sex + as.factor(origin) + year +              as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat) + Hpsi, family=binomial, data=hivpoint.c, weights=w.c, id=id, corstr="independence")
+  
+  Hpsi.coefs[j,1] <- summary(gest.fit)$coefficients["Hpsi", "Estimate"]
+  Hpsi.coefs[j,2] <- summary(gest.fit)$coefficients["Hpsi", "Pr(>|W|)"]
+}
+
+rownames(Hpsi.coefs) <- grid
+Hpsi.coefs
+
+
+
+
+###
+library(tidyverse)
+as.data.frame(Hpsi.coefs) -> Hpsi.coefs
+
+#95% CI
+#find the bound that is next closest to 0.05?
+Hpsi.coefs %>% filter (`p-value` < 0.06 & `p-value` >0.04)
+
+#p value
+Hpsi.coefs %>% filter (`p-value` >0.99)
+
+#estimate
+x <- Hpsi.coefs$Estimate
+row <- which(x == x[which.min(abs(x))])
+Hpsi.coefs[row,]
+  
+
+
+
+```
+
+
+##Question 10
+#estimate the causal effect of interest with confounding and selection bias adjustment via outcome regression on the confounders
+```{r pressure, echo=FALSE}
+
+linear_model_1<- glm(logrna ~ treatment + censoring+ age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), family= gaussian(link = "identity"), data = hivpoint.c)
+
+summary(linear_model_1)
+
+predicted_probability <- predict(linear_model_1, newdata = hivpoint, type="response")
+
+options(digits=4)
+coefficients(linear_model_1)
+confint(linear_model_1)
+
+```
+##Question23
+##estimate the causal effect of interest with confounding adjustment via outcome regression on the propensity score and selection bias adjustment via IP weighting with non-stabilized weights. Please model the propensity score with a linear and a quadratic term. Please fit the propensity score model in the pseudopopulation.
+
+```{r}
+#fit PS model E[A=1|L]
+fit.para1 <- glm(treatment ~ age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), data = hivpoint, family=binomial())
+summary(fit.para1)
+
+hivpoint$p.treatment1 <- predict(fit.para1, type="response")
+
+#IPW for selection bias, non-stabilized already calculated (w.c)
+
+#MSM
+msm.valid1 <- geeglm(logrna ~ treatment + p.treatment1 + I(p.treatment1 * p.treatment1), data=hivpoint, weights=w.c, id=id,
+                corstr="independence")
+summary(msm.valid1)
+
+options(digits=4)
+beta <- coef(msm.valid1)
+SE <- coef(summary(msm.valid1))[,2]
+lcl <- beta-qnorm(0.975)*SE 
+ucl <- beta+qnorm(0.975)*SE
+cbind(beta, lcl, ucl)
+
+
+
+```
+##Question 29
+##estimate the causal effect of interest with confounding and selection bias adjustment via standardization based on the confounders. That is, fit an outcome regression model with treatment and confounders as covariates, and standardize over the distribution of the confounders.
+
+```{r}
+
+# create a dataset with 3 copies of each subject
+hivpoint$interv <- -1 # 1st copy: equal to original one
+
+interv0 <- hivpoint # 2nd copy: treatment set to 0, outcome to missing
+interv0$interv <- 0
+interv0$treatment<- 0
+interv0$logrna <- NA
+
+interv1 <- hivpoint # 3rd copy: treatment set to 1, outcome to missing
+interv1$interv <- 1
+interv1$treatment<- 1
+interv1$logrna <- NA
+
+onesample <- rbind(hivpoint, interv0, interv1) # combining datasets
+
+# linear model to estimate mean outcome conditional on treatment and confounders
+# parameters are estimated using original observations only 
+# parameter estimates are used to predict mean outcome for observations with 
+# treatment set to 0 (interv=0) and to 1 (interv=1)
+
+#fit model
+std <- glm(logrna~treatment + age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), data=onesample,family=gaussian())
+summary(std)   
+
+#obtained predicted values for everyone
+onesample$predicted_meanY1 <- predict(std, onesample,type = "response")
+
+#obtain standardized risk difference comparing had everyone been treated versus had no one been treated
+a <- mean(onesample[which(onesample$interv==1 & onesample$censoring == 0),]$predicted_meanY1) -
+mean(onesample[which(onesample$interv==0  & onesample$censoring == 0),]$predicted_meanY1)
+
+print(a, digits=4)
+
+
+##########################
+# function to calculate difference in means
+standardization <- function(data, indices) {
+  # create a dataset with 3 copies of each subject
+  d <- data[indices,] # 1st copy: equal to original one`
+  d$interv <- -1
+  d0 <- d # 2nd copy: treatment set to 0, outcome to missing
+  d0$interv <- 0
+  d0$treatment<- 0
+  d0$logrna <- NA
+  d1 <- d # 3rd copy: treatment set to 1, outcome to missing
+  d1$interv <- 1
+  d1$treatment<- 1
+  d1$logrna <- NA
+  d.onesample <- rbind(d, d0, d1) # combining datasets
+
+  # linear model to estimate mean outcome conditional on treatment and confounders
+  # parameters are estimated using original observations only (interv= -1)
+  # parameter estimates are used to predict mean outcome for observations with set 
+  # treatment (interv=0 and interv=1)
+  fit <- glm(logrna ~ treatment + age + sex + as.factor(origin) + year + as.factor(mode) + as.factor(cd4_0_cat) + as.factor(rna_0_cat), 
+             data=d.onesample)
+  
+  d.onesample$predicted_meanY <- predict(fit, d.onesample)
+  
+  # estimate mean outcome in each of the groups interv=-1, interv=0, and interv=1
+  return(c(mean(d.onesample$predicted_meanY[d.onesample$interv==-1]),
+    mean(d.onesample$predicted_meanY[d.onesample$interv==0]),
+    mean(d.onesample$predicted_meanY[d.onesample$interv==1]),
+    mean(d.onesample$predicted_meanY[d.onesample$interv==1])-
+      mean(d.onesample$predicted_meanY[d.onesample$interv==0])))
+}
+
+# bootstrap
+results <- boot(data=hivpoint, statistic=standardization, R=500)
+
+# generating confidence intervals
+se <- c(sd(results$t[,1]), sd(results$t[,2]), 
+        sd(results$t[,3]), sd(results$t[,4]))
+mean <- c(mean(results$t[,1]), mean(results$t[,2]), 
+          mean(results$t[,3]), mean(results$t[,4]))
+ll <- mean - qnorm(0.975)*se
+ul <- mean + qnorm(0.975)*se
+
+bootstrap <- data.frame(cbind(c("Observed", "No Treatment", "Treatment", 
+                                "Treatment - No Treatment"), mean, se, ll, ul))
+bootstrap
+
+
+```
+#Question 35
+#estimate the causal effect of interest with confounding and selection bias adjustment via standardization based on the propensity score. That is, use an outcome regression model with treatment and propensity score as covariates, and standardize over the distribution of the propensity score. Please model the propensity score with a linear and a quadratic term. You can assume that the propensity score is sufficient to adjust for selection bias. 
+```{r}
+
+#PS was created in the previous question
+
+#fit model
+std1 <- glm(logrna ~ treatment + p.treatment1 + I(p.treatment1 * p.treatment1), data=onesample,family=gaussian())
+summary(std1)   
+
+#obtained predicted values for everyone
+onesample$predicted_meanY2 <- predict(std1, onesample,type = "response")
+
+#obtain standardized risk difference comparing had everyone been treated versus had no one been treated
+a <- mean(onesample[which(onesample$interv==1 & onesample$censoring == 0),]$predicted_meanY2) -
+mean(onesample[which(onesample$interv==0 & onesample$censoring == 0),]$predicted_meanY2)
+
+print(a, digits=4)
+
+```
+
